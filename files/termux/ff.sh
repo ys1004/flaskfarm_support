@@ -130,11 +130,13 @@ prepare() {
 install() {
     stop
     mkdir -p $DIR_DATA    
-    pkg in -y git wget python
+    pkg in -y git wget python3.10
     git config --global --add safe.directory '*'
     python -m pip install --upgrade pip wheel setuptools
-    pkg in -y binutils libjpeg-turbo libpng 
+    pkg in -y binutils libjpeg-turbo libpng libxml2 libxslt 
+    pkg in -y python-cryptography python-lxml python-pillow
     pip install --upgrade FlaskFarm
+    pip install redis tzdata lxml pathlib
 
     if [ ! -e $CONFIGFILE ]; then
         cat <<EOF >$CONFIGFILE
