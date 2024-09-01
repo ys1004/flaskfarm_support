@@ -58,7 +58,17 @@ EOF
     echo "nohup ff start > /dev/null 2>&1 &" >> $HOME/.bashrc
     echo "Restart termux!"
 }
- 
+
+
+set64() {
+    ln -s ~/../usr/lib/python3.11/site-packages/flaskfarm/lib/support/libsc/sc.cpython-311_64.so ~/../usr/lib/python3.11/site-packages/flaskfarm/lib/support/libsc/sc.cpython-311.so
+    echo "Apply 64bit.."
+}
+
+set32() {
+    ln -s ~/../usr/lib/python3.11/site-packages/flaskfarm/lib/support/libsc/sc.cpython-311_32.so ~/../usr/lib/python3.11/site-packages/flaskfarm/lib/support/libsc/sc.cpython-311.so
+    echo "Apply 32bit.."
+}
  
 start() {
     printf "\n\nApp을 시작합니다.\n\n"
@@ -84,15 +94,7 @@ start() {
     done
 }
 
-set64() {
-    ln -s ~/../usr/lib/python3.11/site-packages/flaskfarm/lib/support/libsc/sc.cpython-311_64.so ~/../usr/lib/python3.11/site-packages/flaskfarm/lib/support/libsc/sc.cpython-311.so
-    echo "Apply 64bit.."
-}
 
-set32() {
-    ln -s ~/../usr/lib/python3.11/site-packages/flaskfarm/lib/support/libsc/sc.cpython-311_32.so ~/../usr/lib/python3.11/site-packages/flaskfarm/lib/support/libsc/sc.cpython-311.so
-    echo "Apply 32bit.."
-}
 
 
 
