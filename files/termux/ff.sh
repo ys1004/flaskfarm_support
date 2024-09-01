@@ -40,7 +40,7 @@ prepare() {
 install() {
     stop
     mkdir -p $DIR_DATA    
-    pkg in -y git wget python3.10
+    pkg in -y git wget python
     git config --global --add safe.directory '*'
     python -m pip install --upgrade pip wheel setuptools
     pkg in -y binutils libjpeg-turbo libpng libxml2 libxslt 
