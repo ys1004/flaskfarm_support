@@ -51,7 +51,7 @@ install() {
     if [ ! -e $CONFIGFILE ]; then
         cat <<EOF >$CONFIGFILE
 path_data: "$DIR_DATA"
-use_celery: false
+use_celery: False
 running_type: termux
 EOF
     fi
