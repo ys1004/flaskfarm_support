@@ -4,7 +4,7 @@ DIR_DATA="/storage/emulated/0/Download/flaskfarm"
 CONFIGFILE=$DIR_DATA/config.yaml
 DIR_BIN="$PREFIX/bin"
 SCRIPT_TYPE="termux"
-SCRIPT_VERSION="1.3.1"
+SCRIPT_VERSION="1.3.2"
 SCRIPT_NAME="ff.sh"
 SCRIPT_URL="https://raw.githubusercontent.com/flaskfarm/flaskfarm_support/main/files/termux/ff.sh"
 PS_COMMAND="ps -eo pid,args"
@@ -61,11 +61,13 @@ EOF
 
 
 set64() {
+    rm ~/../usr/lib/python3.11/site-packages/flaskfarm/lib/support/libsc/sc.cpython-311.so
     ln -s ~/../usr/lib/python3.11/site-packages/flaskfarm/lib/support/libsc/sc.cpython-311_64.so ~/../usr/lib/python3.11/site-packages/flaskfarm/lib/support/libsc/sc.cpython-311.so
     echo "Apply 64bit.."
 }
 
 set32() {
+    rm ~/../usr/lib/python3.11/site-packages/flaskfarm/lib/support/libsc/sc.cpython-311.so
     ln -s ~/../usr/lib/python3.11/site-packages/flaskfarm/lib/support/libsc/sc.cpython-311_32.so ~/../usr/lib/python3.11/site-packages/flaskfarm/lib/support/libsc/sc.cpython-311.so
     echo "Apply 32bit.."
 }
@@ -80,7 +82,7 @@ start() {
     while true; 
     do
         pip install --upgrade FlaskFarm
-        set64()
+        set64
         python -m flaskfarm.main --repeat ${COUNT} --config ${CONFIGFILE}
         RESULT=$?
         echo "PYTHON EXIT CODE : ${RESULT}.............."
