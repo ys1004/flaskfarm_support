@@ -7,7 +7,7 @@ DIR_BIN="/usr/bin"
 GIT="https://github.com/flaskfarm/flaskfarm.git"
 
 SCRIPT_TYPE="docker"
-SCRIPT_VERSION="1.3.0"
+SCRIPT_VERSION="1.3.1"
 SCRIPT_NAME="ff.sh"
 SCRIPT_BIN_NAME="ff"
 SCRIPT_URL="https://raw.githubusercontent.com/flaskfarm/flaskfarm_support/main/docker/normal/ff.sh"
@@ -137,7 +137,7 @@ first() {
         echo $LINE
         echo -e "Run setup.sh"
         echo $LINE
-        $PIP install lxml xmltodict sqlitedict
+        #$PIP install lxml xmltodict sqlitedict
         cat <<EOF > /root/export.sh
 export RUNNING_TYPE=docker
 export C_FORCE_ROOT=true
