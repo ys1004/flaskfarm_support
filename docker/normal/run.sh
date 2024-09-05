@@ -1,9 +1,6 @@
 #!/bin/bash
-export RUNNING_TYPE=docker
-export C_FORCE_ROOT=true
-export CELERYD_HIJACK_ROOT_LOGGER=false
-export GEVENT_SUPPORT=true
-#export DOCKER_NONSTOP=true
+source /root/export.sh
+/usr/bin/ff first
 
 redis-server --daemonize yes
 COUNT=0
@@ -23,10 +20,7 @@ do
 done
 
 if [ "$DOCKER_NONSTOP" = "true" ]; then
-    while true;
-    do
-        sleep 1d
-    done
+    sleep 1000d
 else
     echo 'FalskFarm container has stopped!!'
 fi

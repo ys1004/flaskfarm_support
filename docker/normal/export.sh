@@ -1,0 +1,4 @@
+export RUNNING_TYPE=docker
+export C_FORCE_ROOT=true
+export CELERYD_HIJACK_ROOT_LOGGER=false
+export GEVENT_SUPPORT=true
