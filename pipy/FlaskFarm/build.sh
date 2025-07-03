@@ -1,5 +1,5 @@
 #!/bin/bash
-HOME=/data/flaskfarm_support/pipy/flaskfarm
+HOME=/data/flaskfarm_support/pipy/FlaskFarm
 rm -rf $HOME/flaskfarm
 rm -rf $HOME/build
 rm -rf $HOME/dist

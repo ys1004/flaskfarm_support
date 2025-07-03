@@ -10,7 +10,7 @@ import setuptools
 if platform.system() == 'Windows':
     f = open('C:\\work\\FlaskFarm\\flaskfarm_support\\pipy\\flaskfarm\\flaskfarm\\lib\\framework\\version.py').read()
 else:
-    f = open('/data/flaskfarm_support/pipy/flaskfarm/flaskfarm/lib/framework/version.py').read()
+    f = open('/data/flaskfarm_support/pipy/FlaskFarm/flaskfarm/lib/framework/version.py').read()
 
 version = f.split('=')[1].replace('"', '').strip()
 print(version)

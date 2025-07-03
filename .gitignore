@@ -1,9 +1,10 @@
-pipy/flaskfarm/build/
-pipy/flaskfarm/dist/
-pipy/flaskfarm/FlaskFarm.egg-info/
-pipy/flaskfarm/flaskfarm/
-pipy/flaskfarm/.*/
-pipy/flaskfarm/pipy_token.txt
+pipy/FlaskFarm/build/
+pipy/FlaskFarm/dist/
+pipy/FlaskFarm/FlaskFarm.egg-info/
+pipy/FlaskFarm/flaskfarm/
+pipy/FlaskFarm/.*/
+pipy/FlaskFarm/pipy_token.txt
 pipy/data*/
 docker/alpine/
 false/ 
+tmp/

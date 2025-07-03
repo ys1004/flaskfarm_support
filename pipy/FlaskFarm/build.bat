@@ -1,5 +1,5 @@
 call C:\work\FlaskFarm\.env\Scripts\activate 
-SET HOME=C:\work\FlaskFarm\flaskfarm_support\pipy\flaskfarm
+SET HOME=C:\work\FlaskFarm\flaskfarm_support\pipy\FlaskFarm
 
 rmdir /s /q %HOME%\flaskfarm
 rmdir /s /q %HOME%\build
