@@ -8,3 +8,4 @@ pipy/data*/
 docker/alpine/
 false/ 
 tmp/
+pipy_token.txt
