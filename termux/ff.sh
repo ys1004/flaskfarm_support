@@ -7,7 +7,7 @@ VENV_DIR="$HOME/ff_venv"
 VENV_PY="$VENV_DIR/bin/python"
 VENV_PIP="$VENV_DIR/bin/pip"
 SCRIPT_TYPE="termux-venv"
-SCRIPT_VERSION="1.5.5"
+SCRIPT_VERSION="1.5.6"
 SCRIPT_NAME="ff.sh"
 SCRIPT_URL="https://raw.githubusercontent.com/ys1004/flaskfarm_support/refs/heads/main/termux/ff.sh"
 PS_COMMAND="ps -eo pid,args"
@@ -59,7 +59,7 @@ prepare() {
     termux-setup-storage
     pkg update -y
     pkg upgrade -y
-    pkg install -y termux-services
+    pkg install -y termux-services libc++ libcurl
 }
 
 install() {
@@ -70,9 +70,9 @@ install() {
     pkg install -y tur-repo
     pkg update -y
 
-    echo -e "\n[2/5] Python 3.11 및 C 빌드 라이브러리 설치"
+    echo -e "\n[2/5] Python 3.11 및 C/C++ 빌드 런타임 라이브러리 설치"
     pkg install -y python3.11
-    pkg install -y git wget pkg-config clang make binutils libxml2 libxslt libiconv zlib libjpeg-turbo libpng libffi openssl
+    pkg install -y git wget pkg-config clang make binutils libc++ libcurl libxml2 libxslt libiconv zlib libjpeg-turbo libpng libffi openssl
 
     echo -e "\n[3/5] Python 3.11 독립 가상환경(venv) 생성"
     rm -rf "$VENV_DIR"
@@ -90,8 +90,8 @@ install() {
     LDFLAGS="-L$PREFIX/lib" \
     "$VENV_PIP" install lxml --no-build-isolation
 
-    echo -e "\n[5/5] FlaskFarm 및 보조 모듈(slack-sdk, gevent 등) 설치"
-    "$VENV_PIP" install FlaskFarm redis tzdata pathlib "celery[redis]" slack-sdk gevent psutil requests
+    echo -e "\n[5/5] FlaskFarm 및 보조 모듈(slack-sdk, curl_cffi, gevent 등) 설치"
+    "$VENV_PIP" install FlaskFarm redis tzdata pathlib "celery[redis]" slack-sdk curl_cffi gevent psutil requests
 
     detect_so
     if [ ! -e "$CONFIGFILE" ]; then
@@ -124,6 +124,11 @@ start() {
     if [ ! -x "$VENV_PY" ]; then
         echo "가상환경($VENV_DIR)이 존재하지 않습니다. 먼저 1번 메뉴(APP 설치)를 실행하세요."
         return 1
+    fi
+
+    # [핵심] curl_cffi NDK C++ 심볼 에러 방지 (libc++_shared.so 강제 선로드)
+    if [ -f "$PREFIX/lib/libc++_shared.so" ]; then
+        export LD_PRELOAD="$PREFIX/lib/libc++_shared.so"
     fi
 
     # [핵심] 가상환경 bin 디렉터리를 PATH 최우선으로 등록
@@ -161,7 +166,7 @@ start() {
             fi
         fi
 
-        # PATH 최우선 설정으로 인해 python 명령이 가상환경(ff_venv)을 자동 호출함
+        # PATH와 LD_PRELOAD 설정이 적용된 환경에서 구동
         python -m flaskfarm.main --repeat ${COUNT} --config "${CONFIGFILE}"
         RESULT=$?
         echo "PYTHON EXIT CODE : ${RESULT}.............."
