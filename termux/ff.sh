@@ -3,16 +3,18 @@ LINE="==========================================="
 DIR_DATA="/storage/emulated/0/Download/flaskfarm"
 CONFIGFILE="$DIR_DATA/config.yaml"
 DIR_BIN="$PREFIX/bin"
-SCRIPT_TYPE="termux"
-SCRIPT_VERSION="1.4.1"
+VENV_DIR="$HOME/ff_venv"
+VENV_PY="$VENV_DIR/bin/python"
+VENV_PIP="$VENV_DIR/bin/pip"
+SCRIPT_TYPE="termux-venv"
+SCRIPT_VERSION="1.4.0"
 SCRIPT_NAME="ff.sh"
 SCRIPT_URL="https://raw.githubusercontent.com/ys1004/flaskfarm_support/refs/heads/main/termux/ff.sh"
 PS_COMMAND="ps -eo pid,args"
 
 ###########################################
-# 공통 유틸리티
+# 유틸리티
 ###########################################
-# .bashrc 중복 등록 방지
 add_to_bashrc() {
     local cmd="$1"
     if ! grep -Fxq "$cmd" "$HOME/.bashrc" 2>/dev/null; then
@@ -20,11 +22,12 @@ add_to_bashrc() {
     fi
 }
 
-# 32/64비트 환경 자동 판별
 detect_so() {
     if [ -z "$SO" ]; then
         local BIT
-        BIT=$(python -c "import struct; print(struct.calcsize('P') * 8)" 2>/dev/null)
+        if [ -x "$VENV_PY" ]; then
+            BIT=$("$VENV_PY" -c "import struct; print(struct.calcsize('P') * 8)" 2>/dev/null)
+        fi
         if [ "$BIT" = "64" ] || [ "$BIT" = "32" ]; then
             export SO="$BIT"
         else
@@ -41,64 +44,56 @@ install_sh() {
     if curl -fsSL -o "$PREFIX/bin/$SCRIPT_NAME" "$SCRIPT_URL"; then
         chmod +x "$PREFIX/bin/$SCRIPT_NAME"
         ln -sf "$PREFIX/bin/$SCRIPT_NAME" "$PREFIX/bin/ff"
-        printf "성공! 이제 ff.sh 혹은 ff로 스크립트를 실행할 수 있습니다.\n"
+        printf "성공! 이제 ff.sh 혹은 ff 명령어로 실행할 수 있습니다.\n"
     else
-        printf "\n실패하였습니다.\n"
+        printf "\n다운로드에 실패하였습니다.\n"
     fi
 }
 
 stop() {
-    $PS_COMMAND | grep main.py | grep -v grep | awk '{print $1}' | xargs -r kill -9
-    $PS_COMMAND | grep flaskfarm | grep -v grep | awk '{print $1}' | xargs -r kill -9
+    $PS_COMMAND | grep main.py | grep -v grep | awk '{print $1}' | xargs -r kill -9 2>/dev/null
+    $PS_COMMAND | grep flaskfarm | grep -v grep | awk '{print $1}' | xargs -r kill -9 2>/dev/null
 }
 
 prepare() {
     termux-setup-storage
     pkg update -y
     pkg upgrade -y
-    pkg install -y termux-services clang binutils
-}
-
-# Python 3.11 전용 설치 및 패키지 업데이트 고정
-setup_python311() {
-    echo -e "\n\n[Python 3.11 환경 설정 시작]"
-    pkg install -y tur-repo
-    pkg update -y
-    pkg install -y python3.11
-    
-    # 기본 python 심볼릭 링크를 3.11로 교체
-    ln -sf "$PREFIX/bin/python3.11" "$PREFIX/bin/python"
-    
-    # pkg upgrade 시 상위 파이썬 버전으로 덮어쓰지 않도록 고정
-    apt-mark hold python
-    
-    # pip 기본 모듈 준비 및 최신화
-    python -m ensurepip 2>/dev/null || true
-    python -m pip install --upgrade pip wheel setuptools
-    
-    echo -e "\n-------------------------------------------"
-    echo -e "적용 완료된 파이썬 버전:"
-    python --version
-    echo -e "Python 패키지가 3.11로 고정(hold)되었습니다."
-    echo -e "-------------------------------------------"
+    pkg install -y termux-services clang make binutils
 }
 
 install() {
     stop
     mkdir -p "$DIR_DATA"
-    pkg in -y git wget
-    git config --global --add safe.directory '*'
-    
-    # C 빌드 도구 및 이미지/XML 라이브러리
-    pkg in -y binutils libjpeg-turbo libpng libxml2 libxslt
-    pkg in -y python-cryptography python-pillow
 
-    # lxml 컴파일 에러 및 OOM 방지 옵션 적용
-    CFLAGS="-Wno-error=incompatible-function-pointer-types -O0" python -m pip install lxml
+    echo -e "\n[1/5] 기본 빌드 및 C 라이브러리 설치 (Termux 시스템)"
+    pkg in -y git wget tur-repo
+    pkg update -y
+    pkg in -y python3.11
+    # 순수 C 라이브러리 및 헤더만 설치 (시스템 python 라이브러리와 충돌 방지)
+    pkg in -y libxml2 libxslt libjpeg-turbo libpng libffi openssl
 
-    python -m pip install --upgrade FlaskFarm
-    python -m pip install redis tzdata pathlib "celery[redis]"
-    
+    echo -e "\n[2/5] Python 3.11 독립 가상환경(venv) 생성"
+    if [ ! -d "$VENV_DIR" ]; then
+        python3.11 -m venv "$VENV_DIR"
+    fi
+
+    if [ ! -x "$VENV_PY" ]; then
+        echo "오류: 가상환경 생성에 실패했습니다. python3.11 설치 상태를 확인하세요."
+        return 1
+    fi
+
+    echo -e "\n[3/5] 가상환경 기본 빌드 도구 최신화"
+    "$VENV_PIP" install --upgrade pip wheel setuptools cython
+
+    echo -e "\n[4/5] lxml C 바인딩 컴파일 및 설치"
+    CFLAGS="-Wno-error=incompatible-function-pointer-types -O0 -I$PREFIX/include -I$PREFIX/include/libxml2" \
+    LDFLAGS="-L$PREFIX/lib" \
+    "$VENV_PIP" install lxml --no-build-isolation
+
+    echo -e "\n[5/5] FlaskFarm 및 관련 의존성 패키지 설치"
+    "$VENV_PIP" install --upgrade FlaskFarm redis tzdata pathlib "celery[redis]" pillow cryptography
+
     detect_so
     if [ ! -e "$CONFIGFILE" ]; then
         cat <<EOF >"$CONFIGFILE"
@@ -107,8 +102,10 @@ use_celery: False
 running_type: termux
 EOF
     fi
+
     add_to_bashrc "nohup ff start > /dev/null 2>&1 &"
-    echo "설치 완료! Termux를 재실행하거나 'ff start'를 실행하세요."
+    echo -e "\n설치 완료! 가상환경 경로: $VENV_DIR"
+    echo "실행: ff start 또는 메뉴 2번"
 }
 
 set64() {
@@ -125,21 +122,22 @@ start() {
     printf "\n\nApp을 시작합니다.\n\n"
     stop
 
+    if [ ! -x "$VENV_PY" ]; then
+        echo "가상환경($VENV_DIR)이 존재하지 않습니다. 먼저 1번 메뉴(APP 설치)를 실행하세요."
+        return 1
+    fi
+
     detect_so
     echo "현재 적용 아키텍처: ${SO}bit"
 
-    # 외장 스토리지 마운트 대기
     while [ ! -d "$(dirname "$DIR_DATA")" ]; do sleep 1; done
-
-    # 버전 확인 및 업데이트 (루프 바깥에서 1회 수행)
-    python -m pip install --upgrade FlaskFarm
 
     COUNT=0
     while true; 
     do
-        # FlaskFarm 설치 경로 및 CPython ABI 태그 동적 탐색
-        LIBSC_DIR=$(python -c "import flaskfarm, os; print(os.path.join(os.path.dirname(flaskfarm.__file__), 'lib', 'support', 'libsc'))" 2>/dev/null)
-        PY_TAG=$(python -c "import sys; print(f'cpython-{sys.version_info.major}{sys.version_info.minor}')" 2>/dev/null)
+        # 가상환경 내부 site-packages 경로 탐색
+        LIBSC_DIR=$("$VENV_PY" -c "import flaskfarm, os; print(os.path.join(os.path.dirname(flaskfarm.__file__), 'lib', 'support', 'libsc'))" 2>/dev/null)
+        PY_TAG=$("$VENV_PY" -c "import sys; print(f'cpython-{sys.version_info.major}{sys.version_info.minor}')" 2>/dev/null)
 
         if [ -n "$LIBSC_DIR" ] && [ -d "$LIBSC_DIR" ]; then
             TARGET_SO="$LIBSC_DIR/sc.${PY_TAG}.so"
@@ -153,7 +151,6 @@ start() {
             fi
         fi
 
-        # Celery 사용 설정 시 Redis 서버 자동 백그라운드 구동
         if grep -q "use_celery: True" "$CONFIGFILE" 2>/dev/null; then
             if ! pgrep redis-server > /dev/null; then
                 echo "Redis 서버를 실행합니다..."
@@ -162,7 +159,7 @@ start() {
             fi
         fi
 
-        python -m flaskfarm.main --repeat ${COUNT} --config "${CONFIGFILE}"
+        "$VENV_PY" -m flaskfarm.main --repeat ${COUNT} --config "${CONFIGFILE}"
         RESULT=$?
         echo "PYTHON EXIT CODE : ${RESULT}.............."
         if [ "$RESULT" = "1" ]; then
@@ -266,15 +263,14 @@ menu() {
     echo -e "스크립트 v$SCRIPT_VERSION - $SCRIPT_TYPE"
     echo "$LINE"
     echo -e "<설치>"
-    echo "0. 저장소 접근 허용 & 서비스 준비 (필수)"
-    echo "p. Python 3.11 설치 및 고정 (필수)"
-    echo "1. APP 설치"
+    echo "0. 저장소 접근 허용 & 기본 빌드 준비 (필수)"
+    echo "1. APP 및 venv 가상환경 전체 설치 (권장)"
     echo "$LINE"
     echo -e "<실행>"
     echo "2. 시작 - Foreground"
     echo "3. 중지 - stop"
-    echo "4. 64bit so 파일 적용"
-    echo "5. 32bit so 파일 적용"
+    echo "4. 64bit so 파일 강제 적용"
+    echo "5. 32bit so 파일 강제 적용"
     echo "$LINE"
     echo -e "<권장 툴>"
     echo "6. code-server 설치"
@@ -301,7 +297,6 @@ while true; do
     fi
     case $cmd in
         0)  prepare;;
-        p)  setup_python311;;
         1)  install;;
         2)  start;;
         3)  stop;;
@@ -320,7 +315,6 @@ while true; do
         install_sh) install_sh;;
         q)  exit 0;;
         prepare) prepare;;
-        py311) setup_python311;;
         install) install;;
         start) start;;
         stop) stop;;
