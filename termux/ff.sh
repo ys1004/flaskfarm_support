@@ -7,7 +7,7 @@ VENV_DIR="$HOME/ff_venv"
 VENV_PY="$VENV_DIR/bin/python"
 VENV_PIP="$VENV_DIR/bin/pip"
 SCRIPT_TYPE="termux-venv"
-SCRIPT_VERSION="1.4.0"
+SCRIPT_VERSION="1.5.1"
 SCRIPT_NAME="ff.sh"
 SCRIPT_URL="https://raw.githubusercontent.com/ys1004/flaskfarm_support/refs/heads/main/termux/ff.sh"
 PS_COMMAND="ps -eo pid,args"
@@ -59,19 +59,19 @@ prepare() {
     termux-setup-storage
     pkg update -y
     pkg upgrade -y
-    pkg install -y termux-services clang make binutils
+    pkg install -y termux-services clang make binutils pkg-config
 }
 
 install() {
     stop
     mkdir -p "$DIR_DATA"
 
-    echo -e "\n[1/5] 기본 빌드 및 C 라이브러리 설치 (Termux 시스템)"
-    pkg in -y git wget tur-repo
+    echo -e "\n[1/5] 기본 빌드 도구 및 C 라이브러리 설치 (Termux 시스템)"
+    pkg in -y git wget tur-repo pkg-config clang make binutils
     pkg update -y
     pkg in -y python3.11
-    # 순수 C 라이브러리 및 헤더만 설치 (시스템 python 라이브러리와 충돌 방지)
-    pkg in -y libxml2 libxslt libjpeg-turbo libpng libffi openssl
+    # lxml 빌드에 필요한 XML, XSLT, 압축 및 인코딩 C 라이브러리 일체
+    pkg in -y libxml2 libxslt libiconv zlib libjpeg-turbo libpng libffi openssl
 
     echo -e "\n[2/5] Python 3.11 독립 가상환경(venv) 생성"
     if [ ! -d "$VENV_DIR" ]; then
@@ -79,14 +79,15 @@ install() {
     fi
 
     if [ ! -x "$VENV_PY" ]; then
-        echo "오류: 가상환경 생성에 실패했습니다. python3.11 설치 상태를 확인하세요."
+        echo "오류: 가상환경 생성 실패. python3.11 설치 여부를 확인하세요."
         return 1
     fi
 
-    echo -e "\n[3/5] 가상환경 기본 빌드 도구 최신화"
+    echo -e "\n[3/5] 가상환경 기본 빌드 도구 설치"
     "$VENV_PIP" install --upgrade pip wheel setuptools cython
 
-    echo -e "\n[4/5] lxml C 바인딩 컴파일 및 설치"
+    echo -e "\n[4/5] lxml C 바인딩 컴파일 및 설치 (헤더 및 pkg-config 경로 주입)"
+    PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig" \
     CFLAGS="-Wno-error=incompatible-function-pointer-types -O0 -I$PREFIX/include -I$PREFIX/include/libxml2" \
     LDFLAGS="-L$PREFIX/lib" \
     "$VENV_PIP" install lxml --no-build-isolation
@@ -105,7 +106,7 @@ EOF
 
     add_to_bashrc "nohup ff start > /dev/null 2>&1 &"
     echo -e "\n설치 완료! 가상환경 경로: $VENV_DIR"
-    echo "실행: ff start 또는 메뉴 2번"
+    echo "실행: ff start 또는 ff 실행 후 메뉴 2번"
 }
 
 set64() {
@@ -135,7 +136,6 @@ start() {
     COUNT=0
     while true; 
     do
-        # 가상환경 내부 site-packages 경로 탐색
         LIBSC_DIR=$("$VENV_PY" -c "import flaskfarm, os; print(os.path.join(os.path.dirname(flaskfarm.__file__), 'lib', 'support', 'libsc'))" 2>/dev/null)
         PY_TAG=$("$VENV_PY" -c "import sys; print(f'cpython-{sys.version_info.major}{sys.version_info.minor}')" 2>/dev/null)
 
