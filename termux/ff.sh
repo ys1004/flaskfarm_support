@@ -4,7 +4,7 @@ DIR_DATA="/storage/emulated/0/Download/flaskfarm"
 CONFIGFILE="$DIR_DATA/config.yaml"
 DIR_BIN="$PREFIX/bin"
 SCRIPT_TYPE="termux"
-SCRIPT_VERSION="1.4.0"
+SCRIPT_VERSION="1.4.1"
 SCRIPT_NAME="ff.sh"
 SCRIPT_URL="https://raw.githubusercontent.com/ys1004/flaskfarm_support/refs/heads/main/termux/ff.sh"
 PS_COMMAND="ps -eo pid,args"
@@ -59,16 +59,41 @@ prepare() {
     pkg install -y termux-services clang binutils
 }
 
+# Python 3.11 전용 설치 및 패키지 업데이트 고정
+setup_python311() {
+    echo -e "\n\n[Python 3.11 환경 설정 시작]"
+    pkg install -y tur-repo
+    pkg update -y
+    pkg install -y python3.11
+    
+    # 기본 python 심볼릭 링크를 3.11로 교체
+    ln -sf "$PREFIX/bin/python3.11" "$PREFIX/bin/python"
+    
+    # pkg upgrade 시 상위 파이썬 버전으로 덮어쓰지 않도록 고정
+    apt-mark hold python
+    
+    # pip 기본 모듈 준비 및 최신화
+    python -m ensurepip 2>/dev/null || true
+    python -m pip install --upgrade pip wheel setuptools
+    
+    echo -e "\n-------------------------------------------"
+    echo -e "적용 완료된 파이썬 버전:"
+    python --version
+    echo -e "Python 패키지가 3.11로 고정(hold)되었습니다."
+    echo -e "-------------------------------------------"
+}
+
 install() {
     stop
     mkdir -p "$DIR_DATA"
-    pkg in -y git wget python
+    pkg in -y git wget
     git config --global --add safe.directory '*'
-    python -m pip install --upgrade pip wheel setuptools
+    
+    # C 빌드 도구 및 이미지/XML 라이브러리
     pkg in -y binutils libjpeg-turbo libpng libxml2 libxslt
     pkg in -y python-cryptography python-pillow
 
-    # Clang 컴파일 에러 및 OOM 방지 옵션 적용
+    # lxml 컴파일 에러 및 OOM 방지 옵션 적용
     CFLAGS="-Wno-error=incompatible-function-pointer-types -O0" python -m pip install lxml
 
     python -m pip install --upgrade FlaskFarm
@@ -242,6 +267,7 @@ menu() {
     echo "$LINE"
     echo -e "<설치>"
     echo "0. 저장소 접근 허용 & 서비스 준비 (필수)"
+    echo "p. Python 3.11 설치 및 고정 (필수)"
     echo "1. APP 설치"
     echo "$LINE"
     echo -e "<실행>"
@@ -275,6 +301,7 @@ while true; do
     fi
     case $cmd in
         0)  prepare;;
+        p)  setup_python311;;
         1)  install;;
         2)  start;;
         3)  stop;;
@@ -293,6 +320,7 @@ while true; do
         install_sh) install_sh;;
         q)  exit 0;;
         prepare) prepare;;
+        py311) setup_python311;;
         install) install;;
         start) start;;
         stop) stop;;
