@@ -7,7 +7,7 @@ VENV_DIR="$HOME/ff_venv"
 VENV_PY="$VENV_DIR/bin/python"
 VENV_PIP="$VENV_DIR/bin/pip"
 SCRIPT_TYPE="termux-venv"
-SCRIPT_VERSION="1.5.4"
+SCRIPT_VERSION="1.5.5"
 SCRIPT_NAME="ff.sh"
 SCRIPT_URL="https://raw.githubusercontent.com/ys1004/flaskfarm_support/refs/heads/main/termux/ff.sh"
 PS_COMMAND="ps -eo pid,args"
@@ -71,7 +71,6 @@ install() {
     pkg update -y
 
     echo -e "\n[2/5] Python 3.11 및 C 빌드 라이브러리 설치"
-    # python3.11 단독 설치로 패키지 매니저 충돌 방지
     pkg install -y python3.11
     pkg install -y git wget pkg-config clang make binutils libxml2 libxslt libiconv zlib libjpeg-turbo libpng libffi openssl
 
@@ -80,7 +79,7 @@ install() {
     python3.11 -m venv "$VENV_DIR"
 
     if [ ! -x "$VENV_PY" ]; then
-        echo "오류: 가상환경 생성 실패. python3.11 바이너리가 정상 설치되었는지 확인하세요."
+        echo "오류: 가상환경 생성 실패. python3.11 설치 상태를 확인하세요."
         return 1
     fi
 
@@ -91,8 +90,8 @@ install() {
     LDFLAGS="-L$PREFIX/lib" \
     "$VENV_PIP" install lxml --no-build-isolation
 
-    echo -e "\n[5/5] FlaskFarm 및 필수 의존성 패키지 설치"
-    "$VENV_PIP" install FlaskFarm redis tzdata pathlib "celery[redis]"
+    echo -e "\n[5/5] FlaskFarm 및 보조 모듈(slack-sdk, gevent 등) 설치"
+    "$VENV_PIP" install FlaskFarm redis tzdata pathlib "celery[redis]" slack-sdk gevent psutil requests
 
     detect_so
     if [ ! -e "$CONFIGFILE" ]; then
@@ -127,6 +126,10 @@ start() {
         return 1
     fi
 
+    # [핵심] 가상환경 bin 디렉터리를 PATH 최우선으로 등록
+    export PATH="$VENV_DIR/bin:$PATH"
+    export VIRTUAL_ENV="$VENV_DIR"
+
     detect_so
     echo "현재 적용 아키텍처: ${SO}bit"
 
@@ -158,7 +161,8 @@ start() {
             fi
         fi
 
-        "$VENV_PY" -m flaskfarm.main --repeat ${COUNT} --config "${CONFIGFILE}"
+        # PATH 최우선 설정으로 인해 python 명령이 가상환경(ff_venv)을 자동 호출함
+        python -m flaskfarm.main --repeat ${COUNT} --config "${CONFIGFILE}"
         RESULT=$?
         echo "PYTHON EXIT CODE : ${RESULT}.............."
         if [ "$RESULT" = "1" ]; then
