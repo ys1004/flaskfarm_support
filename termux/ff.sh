@@ -7,7 +7,7 @@ VENV_DIR="$HOME/ff_venv"
 VENV_PY="$VENV_DIR/bin/python"
 VENV_PIP="$VENV_DIR/bin/pip"
 SCRIPT_TYPE="termux-venv"
-SCRIPT_VERSION="1.5.3"
+SCRIPT_VERSION="1.5.4"
 SCRIPT_NAME="ff.sh"
 SCRIPT_URL="https://raw.githubusercontent.com/ys1004/flaskfarm_support/refs/heads/main/termux/ff.sh"
 PS_COMMAND="ps -eo pid,args"
@@ -66,27 +66,32 @@ install() {
     stop
     mkdir -p "$DIR_DATA"
 
-    echo -e "\n[1/5] tur-repo 저장소 설치 및 패키지 인덱스 갱신"
+    echo -e "\n[1/5] tur-repo 설치 및 패키지 인덱스 갱신"
     pkg install -y tur-repo
     pkg update -y
 
-    echo -e "\n[2/5] Python 3.11 및 사전 빌드 바이너리 패키지(cryptography, pillow, lxml) 설치"
-    pkg install -y python3.11 python3.11-cryptography python3.11-pillow python3.11-lxml
+    echo -e "\n[2/5] Python 3.11 및 C 빌드 라이브러리 설치"
+    # python3.11 단독 설치로 패키지 매니저 충돌 방지
+    pkg install -y python3.11
     pkg install -y git wget pkg-config clang make binutils libxml2 libxslt libiconv zlib libjpeg-turbo libpng libffi openssl
 
-    echo -e "\n[3/5] 시스템 패키지 연동형 venv 가상환경 생성"
+    echo -e "\n[3/5] Python 3.11 독립 가상환경(venv) 생성"
     rm -rf "$VENV_DIR"
-    python3.11 -m venv --system-site-packages "$VENV_DIR"
+    python3.11 -m venv "$VENV_DIR"
 
     if [ ! -x "$VENV_PY" ]; then
-        echo "오류: 가상환경 생성 실패. python3.11 설치 상태를 확인하세요."
+        echo "오류: 가상환경 생성 실패. python3.11 바이너리가 정상 설치되었는지 확인하세요."
         return 1
     fi
 
-    echo -e "\n[4/5] 가상환경 기본 도구 최신화"
-    "$VENV_PIP" install --upgrade pip wheel setuptools
+    echo -e "\n[4/5] lxml C 바인딩 컴파일 및 설치"
+    "$VENV_PIP" install --upgrade pip wheel setuptools cython
+    PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig" \
+    CFLAGS="-Wno-error=incompatible-function-pointer-types -O0 -I$PREFIX/include -I$PREFIX/include/libxml2" \
+    LDFLAGS="-L$PREFIX/lib" \
+    "$VENV_PIP" install lxml --no-build-isolation
 
-    echo -e "\n[5/5] FlaskFarm 및 관련 패키지 설치"
+    echo -e "\n[5/5] FlaskFarm 및 필수 의존성 패키지 설치"
     "$VENV_PIP" install FlaskFarm redis tzdata pathlib "celery[redis]"
 
     detect_so
@@ -257,7 +262,7 @@ menu() {
     echo -e "스크립트 v$SCRIPT_VERSION - $SCRIPT_TYPE"
     echo "$LINE"
     echo -e "<설치>"
-    echo "0. 저장소 접근 허용 & 서비스 준비 (필수)"
+    echo "0. 저장소 접근 허용 & 기본 빌드 준비 (필수)"
     echo "1. APP 및 venv 가상환경 전체 설치 (원클릭)"
     echo "$LINE"
     echo -e "<실행>"
