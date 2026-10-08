@@ -7,7 +7,7 @@ VENV_DIR="$HOME/ff_venv"
 VENV_PY="$VENV_DIR/bin/python"
 VENV_PIP="$VENV_DIR/bin/pip"
 SCRIPT_TYPE="termux-venv"
-SCRIPT_VERSION="1.5.6"
+SCRIPT_VERSION="1.5.0"
 SCRIPT_NAME="ff.sh"
 SCRIPT_URL="https://raw.githubusercontent.com/ys1004/flaskfarm_support/refs/heads/main/termux/ff.sh"
 PS_COMMAND="ps -eo pid,args"
@@ -53,13 +53,14 @@ install_sh() {
 stop() {
     $PS_COMMAND | grep main.py | grep -v grep | awk '{print $1}' | xargs -r kill -9 2>/dev/null
     $PS_COMMAND | grep flaskfarm | grep -v grep | awk '{print $1}' | xargs -r kill -9 2>/dev/null
+    $PS_COMMAND | grep celery | grep -v grep | awk '{print $1}' | xargs -r kill -9 2>/dev/null
 }
 
 prepare() {
     termux-setup-storage
     pkg update -y
     pkg upgrade -y
-    pkg install -y termux-services libc++ libcurl
+    pkg install -y termux-services libc++ libcurl redis
 }
 
 install() {
@@ -70,8 +71,8 @@ install() {
     pkg install -y tur-repo
     pkg update -y
 
-    echo -e "\n[2/5] Python 3.11 및 C/C++ 빌드 런타임 라이브러리 설치"
-    pkg install -y python3.11
+    echo -e "\n[2/5] Python 3.11, Redis 바이너리 서버 및 빌드 런타임 라이브러리 설치"
+    pkg install -y python3.11 redis
     pkg install -y git wget pkg-config clang make binutils libc++ libcurl libxml2 libxslt libiconv zlib libjpeg-turbo libpng libffi openssl
 
     echo -e "\n[3/5] Python 3.11 독립 가상환경(venv) 생성"
@@ -90,20 +91,23 @@ install() {
     LDFLAGS="-L$PREFIX/lib" \
     "$VENV_PIP" install lxml --no-build-isolation
 
-    echo -e "\n[5/5] FlaskFarm 및 보조 모듈(slack-sdk, curl_cffi, gevent 등) 설치"
+    echo -e "\n[5/5] FlaskFarm 및 보조 모듈(Celery, Redis, curl_cffi, slack-sdk 등) 설치"
     "$VENV_PIP" install FlaskFarm redis tzdata pathlib "celery[redis]" slack-sdk curl_cffi gevent psutil requests
 
     detect_so
     if [ ! -e "$CONFIGFILE" ]; then
         cat <<EOF >"$CONFIGFILE"
 path_data: "$DIR_DATA"
-use_celery: False
+use_celery: True
 running_type: termux
 EOF
+    else
+        sed -i 's/use_celery: False/use_celery: True/g' "$CONFIGFILE"
     fi
 
     add_to_bashrc "nohup ff start > /dev/null 2>&1 &"
     echo -e "\n설치 완료! 가상환경 경로: $VENV_DIR"
+    echo "Redis 바이너리 및 Celery 환경이 준비되었습니다."
     echo "실행: ff start 또는 ff 실행 후 메뉴 2번"
 }
 
@@ -126,12 +130,12 @@ start() {
         return 1
     fi
 
-    # [핵심] curl_cffi NDK C++ 심볼 에러 방지 (libc++_shared.so 강제 선로드)
+    # curl_cffi C++ NDK 심볼 에러 방지
     if [ -f "$PREFIX/lib/libc++_shared.so" ]; then
         export LD_PRELOAD="$PREFIX/lib/libc++_shared.so"
     fi
 
-    # [핵심] 가상환경 bin 디렉터리를 PATH 최우선으로 등록
+    # 가상환경 바이너리 우선순위 부여
     export PATH="$VENV_DIR/bin:$PATH"
     export VIRTUAL_ENV="$VENV_DIR"
 
@@ -139,6 +143,17 @@ start() {
     echo "현재 적용 아키텍처: ${SO}bit"
 
     while [ ! -d "$(dirname "$DIR_DATA")" ]; do sleep 1; done
+
+    # Redis 서버 데몬 자동 확인 및 구동
+    if ! pgrep redis-server > /dev/null 2>&1; then
+        echo "Redis 서버를 백그라운드로 실행합니다..."
+        if command -v redis-server >/dev/null 2>&1; then
+            redis-server --daemonize yes > /dev/null 2>&1
+            sleep 1
+        else
+            echo "경고: redis-server 바이너리를 찾을 수 없습니다. (pkg install redis 필요)"
+        fi
+    fi
 
     COUNT=0
     while true; 
@@ -158,15 +173,6 @@ start() {
             fi
         fi
 
-        if grep -q "use_celery: True" "$CONFIGFILE" 2>/dev/null; then
-            if ! pgrep redis-server > /dev/null; then
-                echo "Redis 서버를 실행합니다..."
-                nohup redis-server > /dev/null 2>&1 &
-                sleep 1
-            fi
-        fi
-
-        # PATH와 LD_PRELOAD 설정이 적용된 환경에서 구동
         python -m flaskfarm.main --repeat ${COUNT} --config "${CONFIGFILE}"
         RESULT=$?
         echo "PYTHON EXIT CODE : ${RESULT}.............."
