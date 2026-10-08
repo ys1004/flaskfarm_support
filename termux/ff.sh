@@ -1,29 +1,52 @@
 #!/data/data/com.termux/files/usr/bin/bash
 LINE="==========================================="
 DIR_DATA="/storage/emulated/0/Download/flaskfarm"
-CONFIGFILE=$DIR_DATA/config.yaml
+CONFIGFILE="$DIR_DATA/config.yaml"
 DIR_BIN="$PREFIX/bin"
 SCRIPT_TYPE="termux"
-SCRIPT_VERSION="1.3.5"
+SCRIPT_VERSION="1.4.0"
 SCRIPT_NAME="ff.sh"
-SCRIPT_URL="https://raw.githubusercontent.com/flaskfarm/flaskfarm_support/main/files/termux/ff.sh"
+SCRIPT_URL="https://raw.githubusercontent.com/ys1004/flaskfarm_support/refs/heads/main/termux/ff.sh"
 PS_COMMAND="ps -eo pid,args"
- 
- 
+
 ###########################################
-# 공통
+# 공통 유틸리티
 ###########################################
-install_sh() {
-    printf "\n다운로드 스크립트 from $SCRIPT_URL\n\n"
-    if curl -fsSL -o $PREFIX/bin/$SCRIPT_NAME "$SCRIPT_URL"; then
-        chmod +x $PREFIX/bin/$SCRIPT_NAME
-        ln -sf $PREFIX/bin/$SCRIPT_NAME $PREFIX/bin/ff
-        printf "성공! 이제 ff.sh 혹은 ff로 스크립트를 실행할 수 있습니다."
-    else
-        printf "\n실패하였습니다."
+# .bashrc 중복 등록 방지
+add_to_bashrc() {
+    local cmd="$1"
+    if ! grep -Fxq "$cmd" "$HOME/.bashrc" 2>/dev/null; then
+        echo "$cmd" >> "$HOME/.bashrc"
     fi
 }
- 
+
+# 32/64비트 환경 자동 판별
+detect_so() {
+    if [ -z "$SO" ]; then
+        local BIT
+        BIT=$(python -c "import struct; print(struct.calcsize('P') * 8)" 2>/dev/null)
+        if [ "$BIT" = "64" ] || [ "$BIT" = "32" ]; then
+            export SO="$BIT"
+        else
+            case "$(uname -m)" in
+                aarch64|x86_64) export SO="64" ;;
+                *) export SO="32" ;;
+            esac
+        fi
+    fi
+}
+
+install_sh() {
+    printf "\n다운로드 스크립트 from %s\n\n" "$SCRIPT_URL"
+    if curl -fsSL -o "$PREFIX/bin/$SCRIPT_NAME" "$SCRIPT_URL"; then
+        chmod +x "$PREFIX/bin/$SCRIPT_NAME"
+        ln -sf "$PREFIX/bin/$SCRIPT_NAME" "$PREFIX/bin/ff"
+        printf "성공! 이제 ff.sh 혹은 ff로 스크립트를 실행할 수 있습니다.\n"
+    else
+        printf "\n실패하였습니다.\n"
+    fi
+}
+
 stop() {
     $PS_COMMAND | grep main.py | grep -v grep | awk '{print $1}' | xargs -r kill -9
     $PS_COMMAND | grep flaskfarm | grep -v grep | awk '{print $1}' | xargs -r kill -9
@@ -33,32 +56,35 @@ prepare() {
     termux-setup-storage
     pkg update -y
     pkg upgrade -y
-    pkg install -y termux-services
+    pkg install -y termux-services clang binutils
 }
-
 
 install() {
     stop
-    mkdir -p $DIR_DATA    
+    mkdir -p "$DIR_DATA"
     pkg in -y git wget python
     git config --global --add safe.directory '*'
     python -m pip install --upgrade pip wheel setuptools
-    pkg in -y binutils libjpeg-turbo libpng libxml2 libxslt 
-    pkg in -y python-cryptography python-lxml python-pillow
-    pip install --upgrade FlaskFarm
-    pip install redis tzdata lxml pathlib
-    set64
-    if [ ! -e $CONFIGFILE ]; then
-        cat <<EOF >$CONFIGFILE
+    pkg in -y binutils libjpeg-turbo libpng libxml2 libxslt
+    pkg in -y python-cryptography python-pillow
+
+    # Clang 컴파일 에러 및 OOM 방지 옵션 적용
+    CFLAGS="-Wno-error=incompatible-function-pointer-types -O0" python -m pip install lxml
+
+    python -m pip install --upgrade FlaskFarm
+    python -m pip install redis tzdata pathlib "celery[redis]"
+    
+    detect_so
+    if [ ! -e "$CONFIGFILE" ]; then
+        cat <<EOF >"$CONFIGFILE"
 path_data: "$DIR_DATA"
 use_celery: False
 running_type: termux
 EOF
     fi
-    echo "nohup ff start > /dev/null 2>&1 &" >> $HOME/.bashrc
-    echo "Restart termux!"
+    add_to_bashrc "nohup ff start > /dev/null 2>&1 &"
+    echo "설치 완료! Termux를 재실행하거나 'ff start'를 실행하세요."
 }
-
 
 set64() {
     export SO="64"
@@ -69,20 +95,49 @@ set32() {
     export SO="32"
     echo "Apply 32bit.."
 }
- 
+
 start() {
     printf "\n\nApp을 시작합니다.\n\n"
-    stop()
-    # 외장 USB를 sdcard로 쓰면 재부팅 시에 스토리지가 올라올때까지 기다려야 한다.
+    stop
+
+    detect_so
+    echo "현재 적용 아키텍처: ${SO}bit"
+
+    # 외장 스토리지 마운트 대기
     while [ ! -d "$(dirname "$DIR_DATA")" ]; do sleep 1; done
- 
+
+    # 버전 확인 및 업데이트 (루프 바깥에서 1회 수행)
+    python -m pip install --upgrade FlaskFarm
+
     COUNT=0
     while true; 
     do
-        pip install --upgrade FlaskFarm
-        rm ~/../usr/lib/python3.11/site-packages/flaskfarm/lib/support/libsc/sc.cpython-311.so
-        ln -s ~/../usr/lib/python3.11/site-packages/flaskfarm/lib/support/libsc/sc.cpython-311_${SO}.so ~/../usr/lib/python3.11/site-packages/flaskfarm/lib/support/libsc/sc.cpython-311.so
-        python -m flaskfarm.main --repeat ${COUNT} --config ${CONFIGFILE}
+        # FlaskFarm 설치 경로 및 CPython ABI 태그 동적 탐색
+        LIBSC_DIR=$(python -c "import flaskfarm, os; print(os.path.join(os.path.dirname(flaskfarm.__file__), 'lib', 'support', 'libsc'))" 2>/dev/null)
+        PY_TAG=$(python -c "import sys; print(f'cpython-{sys.version_info.major}{sys.version_info.minor}')" 2>/dev/null)
+
+        if [ -n "$LIBSC_DIR" ] && [ -d "$LIBSC_DIR" ]; then
+            TARGET_SO="$LIBSC_DIR/sc.${PY_TAG}.so"
+            SRC_SO="$LIBSC_DIR/sc.${PY_TAG}_${SO}.so"
+
+            rm -f "$TARGET_SO"
+            if [ -f "$SRC_SO" ]; then
+                ln -sf "$SRC_SO" "$TARGET_SO"
+            else
+                echo "경고: 호환 바이너리 파일(${SRC_SO})을 찾을 수 없습니다."
+            fi
+        fi
+
+        # Celery 사용 설정 시 Redis 서버 자동 백그라운드 구동
+        if grep -q "use_celery: True" "$CONFIGFILE" 2>/dev/null; then
+            if ! pgrep redis-server > /dev/null; then
+                echo "Redis 서버를 실행합니다..."
+                nohup redis-server > /dev/null 2>&1 &
+                sleep 1
+            fi
+        fi
+
+        python -m flaskfarm.main --repeat ${COUNT} --config "${CONFIGFILE}"
         RESULT=$?
         echo "PYTHON EXIT CODE : ${RESULT}.............."
         if [ "$RESULT" = "1" ]; then
@@ -91,88 +146,51 @@ start() {
             echo 'FINISH....'
             break
         fi 
-        COUNT=`expr $COUNT + 1`
+        COUNT=$((COUNT + 1))
     done
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 install_ffmpeg() {
     pkg in -y ffmpeg
 }
 
-
 install_filebrowser() {
     FILEBROWSER_PATH="$DIR_BIN/filebrowser"
-    TMP_PATH=$HOME/tmp
-    mkdir -p $TMP_PATH
+    TMP_PATH="$HOME/tmp"
+    mkdir -p "$TMP_PATH"
     $PS_COMMAND | grep filebrowser | grep -v grep | awk '{print $1}' | xargs -r kill -9
-    if [ -e $FILEBROWSER_PATH ]; then
-        rm $FILEBROWSER_PATH
-    fi
+    rm -f "$FILEBROWSER_PATH"
+
     case "$(uname -m)" in
         aarch64) ARCH="arm64";;
-        x86_64) ARCH="amd64";;
-        amd64) ARCH="amd64";;
-        *) ARCH="armv7";;
+        x86_64)  ARCH="amd64";;
+        amd64)   ARCH="amd64";;
+        *)       ARCH="armv7";;
     esac
-    curl -Lo $TMP_PATH/file.tar.gz "https://github.com/filebrowser/filebrowser/releases/download/v2.22.4/linux-$ARCH-filebrowser.tar.gz"
-    tar -zxvf $TMP_PATH/file.tar.gz -C $TMP_PATH
+
+    curl -Lo "$TMP_PATH/file.tar.gz" "https://github.com/filebrowser/filebrowser/releases/download/v2.22.4/linux-$ARCH-filebrowser.tar.gz"
+    tar -zxvf "$TMP_PATH/file.tar.gz" -C "$TMP_PATH"
     mv "$TMP_PATH/filebrowser" "$FILEBROWSER_PATH"
-    chmod +x $FILEBROWSER_PATH
-    echo "nohup $FILEBROWSER_PATH -a 0.0.0.0 -p 9996 -d ~/filebrowser.db > /dev/null 2>&1 &" >> $HOME/.bashrc
-    rm -rf $TMP_PATH
+    chmod +x "$FILEBROWSER_PATH"
+    add_to_bashrc "nohup $FILEBROWSER_PATH -a 0.0.0.0 -p 9996 -d ~/filebrowser.db > /dev/null 2>&1 &"
+    rm -rf "$TMP_PATH"
 }
- 
+
 install_rclone() {
     printf "\n\nRclone 설치 중...\n\n"
     curl -fsSL https://raw.githubusercontent.com/wiserain/rclone/mod/install.sh | bash
 }
 
-###########################################
- 
 install_code_server() {
     pkg install -y proot-distro
     proot-distro install ubuntu
     proot-distro login ubuntu -- wget https://raw.githubusercontent.com/flaskfarm/flaskfarm_support/main/files/termux/ff.sh
     proot-distro login ubuntu -- sh code.sh
 
-    config="$DIR_DATA/code-server/config.yaml"
-    mkdir -p $DIR_DATA/code-server
-    if [ ! -e $config ]; then
-        cat <<EOF >$config
+    local config="$DIR_DATA/code-server/config.yaml"
+    mkdir -p "$DIR_DATA/code-server"
+    if [ ! -e "$config" ]; then
+        cat <<EOF >"$config"
 bind-addr: 127.0.0.1:9995
 auth: password
 password: admin
@@ -180,68 +198,64 @@ cert: false
 EOF
     fi
 
-    echo "nohup proot-distro login ubuntu --bind /storage/emulated/0:/storage --bind ~:/termux_home -- sh run.sh > /dev/null 2>&1 &" >> $HOME/.bashrc
-    rm -rf $HOME/.cache/code-server
+    add_to_bashrc "nohup proot-distro login ubuntu --bind /storage/emulated/0:/storage --bind ~:/termux_home -- sh run.sh > /dev/null 2>&1 &"
+    rm -rf "$HOME/.cache/code-server"
 }
 
 install_transmission() {
     echo -e "\n\ntransmission 설치를 시작합니다."
     pkg in -y transmission
-    if [ ! -d $PREFIX/share/transmission/web_default ]; then
-        mv $PREFIX/share/transmission/web $PREFIX/share/transmission/web_default
+    if [ ! -d "$PREFIX/share/transmission/web_default" ]; then
+        mv "$PREFIX/share/transmission/web" "$PREFIX/share/transmission/web_default"
     else
-        rm -rf $PREFIX/share/transmission/web
+        rm -rf "$PREFIX/share/transmission/web"
     fi
-    git clone https://github.com/ronggang/transmission-web-control $HOME/twc
-    mv $HOME/twc/src $PREFIX/share/transmission/web
-    rm -rf $HOME/twc
+    git clone https://github.com/ronggang/transmission-web-control "$HOME/twc"
+    mv "$HOME/twc/src" "$PREFIX/share/transmission/web"
+    rm -rf "$HOME/twc"
     sv-enable transmission
 }
- 
+
 install_sshd() {
     echo -e "\n\nsshd 설치를 시작합니다."
     pkg in -y openssh
     echo -e "\n암호를 입력하세요\n"
     passwd
-    echo "IP   : "$(ifconfig wlan0 | grep inet | awk '{print $2}')
+    echo "IP   : $(ifconfig wlan0 2>/dev/null | grep inet | awk '{print $2}')"
     echo "PORT : 8022"
     echo "USER : $(whoami)"
-    echo "sshd" >> $HOME/.bashrc
+    add_to_bashrc "sshd"
 }
- 
+
 install_vim() {
     pkg in -y vim-python
-    cat <<EOF >~/.vimrc
+    cat <<EOF >"$HOME/.vimrc"
 set encoding=utf-8
 set fileencodings=utf-8,euc-kr
 EOF
 }
- 
-###########################################
 
- 
- 
 menu() {
     clear
-    echo $LINE
+    echo "$LINE"
     echo -e "스크립트 v$SCRIPT_VERSION - $SCRIPT_TYPE"
-    echo $LINE
+    echo "$LINE"
     echo -e "<설치>"
     echo "0. 저장소 접근 허용 & 서비스 준비 (필수)"
     echo "1. APP 설치"
-    echo $LINE
+    echo "$LINE"
     echo -e "<실행>"
     echo "2. 시작 - Foreground"
     echo "3. 중지 - stop"
     echo "4. 64bit so 파일 적용"
     echo "5. 32bit so 파일 적용"
-    echo $LINE   
-    echo -e "<권장 툴>" 
+    echo "$LINE"
+    echo -e "<권장 툴>"
     echo "6. code-server 설치"
     echo "7. Filebrowser 설치"
-    echo "8. rclone 설치 (이치로님 버전)"
-    echo "9. ffmpeg 설치" 
-    echo $LINE   
+    echo "8. rclone 설치"
+    echo "9. ffmpeg 설치"
+    echo "$LINE"
     echo -e "<기타>"
     echo "c. vi 설치"
     echo "d. sshd 설치"
@@ -249,11 +263,9 @@ menu() {
     echo "x. .bashrc 확인"
     echo "y. ps -ef"
     echo "z. 스크립트 업데이트"
-    echo $LINE
+    echo "$LINE"
 }
- 
- 
- 
+
 while true; do
     if [ $# -eq 0 ]; then
         menu
@@ -268,7 +280,7 @@ while true; do
         3)  stop;;
         4)  set64;;
         5)  set32;;
-        6)  install_code_server;; 
+        6)  install_code_server;;
         7)  install_filebrowser;;
         8)  install_rclone;;
         9)  install_ffmpeg;;
@@ -276,16 +288,16 @@ while true; do
         d)  install_sshd;;
         e)  install_transmission;;
         x)  echo -e "\n\n$LINE" && cat "$HOME/.bashrc" && echo -e "\n$LINE";;
-        y)  echo "`ps -ef`";;
+        y)  ps -ef;;
         z)  echo -e "\n\n업데이트를 시작합니다." && install_sh && echo -e "\n\n재실행하세요.\n" && exit;;
         install_sh) install_sh;;
-        q) install_sh;;
+        q)  exit 0;;
         prepare) prepare;;
         install) install;;
         start) start;;
         stop) stop;;
         [\s\n]) ;;
-        *) echo -e "\n" && exit
+        *)  echo -e "\n" && exit 0;;
     esac
     echo -e "\n"
     if [ $# -eq 0 ]; then
@@ -295,4 +307,4 @@ while true; do
     fi
 done
 
-exit
+exit 0
