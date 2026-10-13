@@ -7,7 +7,7 @@ VENV_DIR="$HOME/ff_venv"
 VENV_PY="$VENV_DIR/bin/python"
 VENV_PIP="$VENV_DIR/bin/pip"
 SCRIPT_TYPE="termux-venv"
-SCRIPT_VERSION="1.5.5"
+SCRIPT_VERSION="1.5.6"
 SCRIPT_NAME="ff.sh"
 SCRIPT_URL="https://raw.githubusercontent.com/ys1004/flaskfarm_support/refs/heads/main/termux/ff.sh"
 PS_COMMAND="ps -eo pid,args"
@@ -49,14 +49,26 @@ from . import requests
 __version__ = "0.5.10"
 EOF
 
-    # 2. 서브모듈(requests.py) 및 BrowserType/세션 옵션 패치
+    # 2. requests.py 서브모듈 및 BrowserType 순회, Session 생성자 인자 필터링 구현
     cat << 'EOF' > "$SHIM_DIR/requests.py"
-import requests
+import requests as _orig_requests
 from requests import *
+
+class BrowserItem(str):
+    @property
+    def name(self):
+        return str(self)
+    @property
+    def value(self):
+        return str(self)
 
 class _BrowserTypeMeta(type):
     def __getattr__(cls, name):
-        return name
+        return BrowserItem(name)
+    def __iter__(cls):
+        browsers = [BrowserItem(f"chrome{v}") for v in [99, 100, 101, 104, 107, 110, 116, 119, 120, 124]]
+        browsers.append(BrowserItem("chrome"))
+        return iter(browsers)
 
 class BrowserType(metaclass=_BrowserTypeMeta):
     pass
@@ -64,16 +76,36 @@ class BrowserType(metaclass=_BrowserTypeMeta):
 class AsyncSession:
     pass
 
-_orig_request = requests.Session.request
+class Session(_orig_requests.Session):
+    def __init__(self, *args, **kwargs):
+        # curl_cffi 전용 Session 인자 제거 후 기본 Session 호출
+        for key in ['impersonate', 'ja3', 'akamai', 'extra_fp', 'thread', 'curl_options', 'debug', 'max_clients', 'default_headers']:
+            kwargs.pop(key, None)
+        super().__init__()
 
-def _patched_request(self, method, url, *args, **kwargs):
-    for key in ['impersonate', 'ja3', 'akamai', 'extra_fp', 'thread', 'curl_options', 'debug']:
-        kwargs.pop(key, None)
-    return _orig_request(self, method, url, *args, **kwargs)
+    def request(self, method, url, *args, **kwargs):
+        # 통신 요청 시 curl_cffi 전용 인자 제거
+        for key in ['impersonate', 'ja3', 'akamai', 'extra_fp', 'thread', 'curl_options', 'debug']:
+            kwargs.pop(key, None)
+        return super().request(method, url, *args, **kwargs)
 
-requests.Session.request = _patched_request
+def request(method, url, **kwargs):
+    with Session() as session:
+        return session.request(method=method, url=url, **kwargs)
+
+def get(url, params=None, **kwargs):
+    return request('get', url, params=params, **kwargs)
+
+def post(url, data=None, json=None, **kwargs):
+    return request('post', url, data=data, json=json, **kwargs)
+
+def put(url, data=None, **kwargs):
+    return request('put', url, data=data, **kwargs)
+
+def delete(url, **kwargs):
+    return request('delete', url, **kwargs)
 EOF
-    echo "curl_cffi 32bit 고급 호환 모듈(requests.py, BrowserType 포함) 생성 완료"
+    echo "curl_cffi 32bit 완전 호환 모듈(BrowserType 순회 및 Session 인자 필터링) 생성 완료"
 }
 
 patch_flaskfarm_bugs() {
@@ -246,9 +278,9 @@ start() {
     detect_so
     echo "현재 적용 아키텍처: ${SO}bit"
 
-    # 심(Shim) 및 패치 무결성 점검
+    # 심(Shim) 상태 자동 점검 및 최신화
     if [ "$SO" = "32" ]; then
-        if [ ! -f "$VENV_DIR/lib/python3.11/site-packages/curl_cffi/requests.py" ]; then
+        if [ ! -f "$VENV_DIR/lib/python3.11/site-packages/curl_cffi/requests.py" ] || ! grep -q "BrowserItem" "$VENV_DIR/lib/python3.11/site-packages/curl_cffi/requests.py" 2>/dev/null; then
             create_curl_cffi_shim
         fi
     fi
