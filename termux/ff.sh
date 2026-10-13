@@ -1,13 +1,13 @@
 #!/data/data/com.termux/files/usr/bin/bash
 LINE="==========================================="
-DIR_DATA="/storage/emulated/0/Download/flaskfarm"
+DIR_DATA="$HOME/flaskfarm"
 CONFIGFILE="$DIR_DATA/config.yaml"
 DIR_BIN="$PREFIX/bin"
 VENV_DIR="$HOME/ff_venv"
 VENV_PY="$VENV_DIR/bin/python"
 VENV_PIP="$VENV_DIR/bin/pip"
 SCRIPT_TYPE="termux-venv"
-SCRIPT_VERSION="1.5.3"
+SCRIPT_VERSION="1.5.4"
 SCRIPT_NAME="ff.sh"
 SCRIPT_URL="https://raw.githubusercontent.com/ys1004/flaskfarm_support/refs/heads/main/termux/ff.sh"
 PS_COMMAND="ps -eo pid,args"
@@ -79,7 +79,6 @@ setup_boot() {
     echo -e " 1. 'Termux:Boot' 앱이 기기에 별도로 설치되어 있어야 합니다."
     echo -e " 2. 안드로이드 설정 > 앱 관리에서 'Termux' 및 'Termux:Boot'의"
     echo -e "    '배터리 최적화 제외(제한 없음)' 설정이 완료되어 있어야 합니다."
-    echo -e " 3. 기기 재부팅 후 화면 잠금을 1회 해제해야 내장 스토리지가 마운트됩니다."
     echo -e "$LINE\n"
 
     local BOOT_DIR="$HOME/.termux/boot"
@@ -105,7 +104,7 @@ EOF
 #!/data/data/com.termux/files/usr/bin/bash
 termux-wake-lock
 
-# 저장소/네트워크 마운트 대기 후 FlaskFarm 실행
+# 네트워크 안정화 대기 후 FlaskFarm 실행
 sleep 10
 $PREFIX/bin/ff start > /dev/null 2>&1 &
 EOF
@@ -148,10 +147,10 @@ install() {
     echo -e "\n[5/5] FlaskFarm 및 보조 모듈 설치"
     "$VENV_PIP" install FlaskFarm redis tzdata pathlib "celery[redis]" slack-sdk gevent psutil requests
 
-    # 32bit / 64bit 분기에 따른 curl_cffi 처리
+    # 32bit / 64bit 환경 분기 처리
     detect_so
     if [ "$SO" = "64" ]; then
-        echo "64bit 환경: curl_cffi 모듈 설치 시도..."
+        echo "64bit 환경 감지: curl_cffi 모듈 설치 시도..."
         if ! "$VENV_PIP" install curl_cffi; then
             echo "curl_cffi 설치 실패. 대체 심(Shim)을 생성합니다."
             create_curl_cffi_shim
@@ -161,6 +160,7 @@ install() {
         create_curl_cffi_shim
     fi
 
+    mkdir -p "$DIR_DATA"
     if [ ! -e "$CONFIGFILE" ]; then
         cat <<EOF >"$CONFIGFILE"
 path_data: "$DIR_DATA"
@@ -207,7 +207,15 @@ start() {
     detect_so
     echo "현재 적용 아키텍처: ${SO}bit"
 
-    while [ ! -d "$(dirname "$DIR_DATA")" ]; do sleep 1; done
+    # 실행 전 데이터 폴더 및 config.yaml 무결성 보장
+    mkdir -p "$DIR_DATA"
+    if [ ! -f "$CONFIGFILE" ]; then
+        cat <<EOF >"$CONFIGFILE"
+path_data: "$DIR_DATA"
+use_celery: True
+running_type: termux
+EOF
+    fi
 
     if ! pgrep redis-server > /dev/null 2>&1; then
         echo "Redis 서버를 백그라운드로 실행합니다..."
