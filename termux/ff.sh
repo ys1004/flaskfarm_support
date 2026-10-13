@@ -7,7 +7,7 @@ VENV_DIR="$HOME/ff_venv"
 VENV_PY="$VENV_DIR/bin/python"
 VENV_PIP="$VENV_DIR/bin/pip"
 SCRIPT_TYPE="termux-venv"
-SCRIPT_VERSION="1.5.4"
+SCRIPT_VERSION="1.5.5"
 SCRIPT_NAME="ff.sh"
 SCRIPT_URL="https://raw.githubusercontent.com/ys1004/flaskfarm_support/refs/heads/main/termux/ff.sh"
 PS_COMMAND="ps -eo pid,args"
@@ -42,11 +42,48 @@ detect_so() {
 create_curl_cffi_shim() {
     local SHIM_DIR="$VENV_DIR/lib/python3.11/site-packages/curl_cffi"
     mkdir -p "$SHIM_DIR"
+
+    # 1. 최상위 패키지 모듈
     cat << 'EOF' > "$SHIM_DIR/__init__.py"
-import requests as requests
+from . import requests
 __version__ = "0.5.10"
 EOF
-    echo "curl_cffi 32bit 호환 모듈 생성 완료 (requests 우회)"
+
+    # 2. 서브모듈(requests.py) 및 BrowserType/세션 옵션 패치
+    cat << 'EOF' > "$SHIM_DIR/requests.py"
+import requests
+from requests import *
+
+class _BrowserTypeMeta(type):
+    def __getattr__(cls, name):
+        return name
+
+class BrowserType(metaclass=_BrowserTypeMeta):
+    pass
+
+class AsyncSession:
+    pass
+
+_orig_request = requests.Session.request
+
+def _patched_request(self, method, url, *args, **kwargs):
+    for key in ['impersonate', 'ja3', 'akamai', 'extra_fp', 'thread', 'curl_options', 'debug']:
+        kwargs.pop(key, None)
+    return _orig_request(self, method, url, *args, **kwargs)
+
+requests.Session.request = _patched_request
+EOF
+    echo "curl_cffi 32bit 고급 호환 모듈(requests.py, BrowserType 포함) 생성 완료"
+}
+
+patch_flaskfarm_bugs() {
+    local MOD_PLUGIN="$VENV_DIR/lib/python3.11/site-packages/flaskfarm/lib/system/mod_plugin.py"
+    if [ -f "$MOD_PLUGIN" ]; then
+        if ! grep -q "data = \[\]" "$MOD_PLUGIN" 2>/dev/null; then
+            sed -i '/def process_command(/a \        data = []' "$MOD_PLUGIN" 2>/dev/null
+            echo "mod_plugin.py UnboundLocalError 버그 패치 완료"
+        fi
+    fi
 }
 
 install_sh() {
@@ -160,6 +197,8 @@ install() {
         create_curl_cffi_shim
     fi
 
+    patch_flaskfarm_bugs
+
     mkdir -p "$DIR_DATA"
     if [ ! -e "$CONFIGFILE" ]; then
         cat <<EOF >"$CONFIGFILE"
@@ -207,7 +246,15 @@ start() {
     detect_so
     echo "현재 적용 아키텍처: ${SO}bit"
 
-    # 실행 전 데이터 폴더 및 config.yaml 무결성 보장
+    # 심(Shim) 및 패치 무결성 점검
+    if [ "$SO" = "32" ]; then
+        if [ ! -f "$VENV_DIR/lib/python3.11/site-packages/curl_cffi/requests.py" ]; then
+            create_curl_cffi_shim
+        fi
+    fi
+    patch_flaskfarm_bugs
+
+    # 데이터 폴더 및 config.yaml 무결성 보장
     mkdir -p "$DIR_DATA"
     if [ ! -f "$CONFIGFILE" ]; then
         cat <<EOF >"$CONFIGFILE"
@@ -306,7 +353,7 @@ cert: false
 EOF
     fi
 
-    add_to_bashrc "nohup proot-distro login ubuntu --bind /storage/emulated/0:/storage --bind ~:/termux_home -- sh run.sh > /dev/null 2>&1 &"
+    add_to_bashrc "nohup proot-distro login ubuntu --bind $DIR_DATA:/storage --bind ~:/termux_home -- sh run.sh > /dev/null 2>&1 &"
     rm -rf "$HOME/.cache/code-server"
 }
 
