@@ -1,0 +1,5 @@
+#!/data/data/com.termux/files/usr/bin/bash
+curl -LO https://raw.githubusercontent.com/ys1004/flaskfarm_support/refs/heads/main/termux/ff.sh
+bash ./ff.sh
+echo "ff 입력하여 설치 스크립트를 시작하세요."
+
