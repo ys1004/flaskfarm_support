@@ -7,7 +7,7 @@ VENV_DIR="$HOME/ff_venv"
 VENV_PY="$VENV_DIR/bin/python"
 VENV_PIP="$VENV_DIR/bin/pip"
 SCRIPT_TYPE="termux-venv"
-SCRIPT_VERSION="1.5.0"
+SCRIPT_VERSION="1.5.1"
 SCRIPT_NAME="ff.sh"
 SCRIPT_URL="https://raw.githubusercontent.com/ys1004/flaskfarm_support/refs/heads/main/termux/ff.sh"
 PS_COMMAND="ps -eo pid,args"
@@ -61,6 +61,52 @@ prepare() {
     pkg update -y
     pkg upgrade -y
     pkg install -y termux-services libc++ libcurl redis
+}
+
+setup_boot() {
+    echo -e "\n\n$LINE"
+    echo -e "[단서 조항 / 필수 확인]"
+    echo -e " 1. 'Termux:Boot' 앱이 기기에 별도로 설치되어 있어야 합니다."
+    echo -e " 2. 안드로이드 설정 > 앱 관리에서 'Termux' 및 'Termux:Boot'의"
+    echo -e "    '배터리 최적화 제외(제한 없음)' 설정이 완료되어 있어야 합니다."
+    echo -e " 3. 기기 재부팅 후 화면 잠금(PIN/패턴)을 1회 해제해야 내장 스토리지가 마운트됩니다."
+    echo -e "$LINE\n"
+
+    local BOOT_DIR="$HOME/.termux/boot"
+    local BOOT_FILE="$BOOT_DIR/start-services.sh"
+
+    mkdir -p "$BOOT_DIR"
+
+    if [ -f "$BOOT_FILE" ]; then
+        if grep -Fq "ff start" "$BOOT_FILE" 2>/dev/null; then
+            echo "알림: 이미 $BOOT_FILE 에 ff start 설정이 등록되어 있습니다."
+        else
+            cat << 'EOF' >> "$BOOT_FILE"
+
+# FlaskFarm 백그라운드 자동 실행
+sleep 10
+$PREFIX/bin/ff start > /dev/null 2>&1 &
+EOF
+            chmod +x "$BOOT_FILE"
+            echo "기존 $BOOT_FILE 파일 하단에 FlaskFarm 자동 시작 구문을 추가했습니다."
+        fi
+    else
+        cat << 'EOF' > "$BOOT_FILE"
+#!/data/data/com.termux/files/usr/bin/bash
+termux-wake-lock
+
+# 저장소/네트워크 마운트 대기 후 FlaskFarm 실행
+sleep 10
+$PREFIX/bin/ff start > /dev/null 2>&1 &
+EOF
+        chmod +x "$BOOT_FILE"
+        echo "$BOOT_FILE 파일을 신규 생성하고 설정을 적용했습니다."
+    fi
+
+    # 중복 실행 방지 (기존 개별 등록 파일 정리)
+    rm -f "$BOOT_DIR/01-flaskfarm.sh"
+
+    echo -e "\n설정 완료! Termux:Boot 앱을 통해 기기 켜짐 시 자동으로 실행됩니다."
 }
 
 install() {
@@ -276,9 +322,10 @@ menu() {
     echo "$LINE"
     echo -e "스크립트 v$SCRIPT_VERSION - $SCRIPT_TYPE"
     echo "$LINE"
-    echo -e "<설치>"
+    echo -e "<설치 및 부팅 설정>"
     echo "0. 저장소 접근 허용 & 기본 빌드 준비 (필수)"
     echo "1. APP 및 venv 가상환경 전체 설치 (원클릭)"
+    echo "b. 부팅 시 자동 시작 설정 (Termux:Boot 앱 필수)"
     echo "$LINE"
     echo -e "<실행>"
     echo "2. 시작 - Foreground"
@@ -312,6 +359,7 @@ while true; do
     case $cmd in
         0)  prepare;;
         1)  install;;
+        b)  setup_boot;;
         2)  start;;
         3)  stop;;
         4)  set64;;
@@ -329,6 +377,7 @@ while true; do
         install_sh) install_sh;;
         q)  exit 0;;
         prepare) prepare;;
+        boot) setup_boot;;
         install) install;;
         start) start;;
         stop) stop;;
