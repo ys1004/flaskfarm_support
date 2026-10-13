@@ -336,7 +336,7 @@ menu() {
     echo -e "<권장 툴>"
     echo "6. code-server 설치"
     echo "7. Filebrowser 설치"
-    echo "8. rclone 설치"
+    echo "8. rclone 설치 (이치로님 버전)"
     echo "9. ffmpeg 설치"
     echo "$LINE"
     echo -e "<기타>"
