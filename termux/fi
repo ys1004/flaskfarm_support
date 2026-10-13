@@ -1,5 +1,5 @@
 #!/data/data/com.termux/files/usr/bin/bash
-curl -LO https://raw.githubusercontent.com/ys1004/flaskfarm_support/refs/heads/main/termux/ff.sh
-bash ./ff.sh
-echo "ff 입력하여 설치 스크립트를 시작하세요."
-
+curl -fsSL -o $PREFIX/bin/ff.sh https://raw.githubusercontent.com/ys1004/flaskfarm_support/refs/heads/main/termux/ff.sh
+chmod +x $PREFIX/bin/ff.sh
+ln -sf $PREFIX/bin/ff.sh $PREFIX/bin/ff
+echo "설치 완료! 터미널에 'ff'를 입력하여 메뉴를 실행하세요."
