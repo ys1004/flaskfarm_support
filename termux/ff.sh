@@ -7,7 +7,7 @@ VENV_DIR="$HOME/ff_venv"
 VENV_PY="$VENV_DIR/bin/python"
 VENV_PIP="$VENV_DIR/bin/pip"
 SCRIPT_TYPE="termux-venv"
-SCRIPT_VERSION="1.5.1"
+SCRIPT_VERSION="1.5.3"
 SCRIPT_NAME="ff.sh"
 SCRIPT_URL="https://raw.githubusercontent.com/ys1004/flaskfarm_support/refs/heads/main/termux/ff.sh"
 PS_COMMAND="ps -eo pid,args"
@@ -37,6 +37,16 @@ detect_so() {
             esac
         fi
     fi
+}
+
+create_curl_cffi_shim() {
+    local SHIM_DIR="$VENV_DIR/lib/python3.11/site-packages/curl_cffi"
+    mkdir -p "$SHIM_DIR"
+    cat << 'EOF' > "$SHIM_DIR/__init__.py"
+import requests as requests
+__version__ = "0.5.10"
+EOF
+    echo "curl_cffi 32bit 호환 모듈 생성 완료 (requests 우회)"
 }
 
 install_sh() {
@@ -69,7 +79,7 @@ setup_boot() {
     echo -e " 1. 'Termux:Boot' 앱이 기기에 별도로 설치되어 있어야 합니다."
     echo -e " 2. 안드로이드 설정 > 앱 관리에서 'Termux' 및 'Termux:Boot'의"
     echo -e "    '배터리 최적화 제외(제한 없음)' 설정이 완료되어 있어야 합니다."
-    echo -e " 3. 기기 재부팅 후 화면 잠금(PIN/패턴)을 1회 해제해야 내장 스토리지가 마운트됩니다."
+    echo -e " 3. 기기 재부팅 후 화면 잠금을 1회 해제해야 내장 스토리지가 마운트됩니다."
     echo -e "$LINE\n"
 
     local BOOT_DIR="$HOME/.termux/boot"
@@ -103,9 +113,7 @@ EOF
         echo "$BOOT_FILE 파일을 신규 생성하고 설정을 적용했습니다."
     fi
 
-    # 중복 실행 방지 (기존 개별 등록 파일 정리)
     rm -f "$BOOT_DIR/01-flaskfarm.sh"
-
     echo -e "\n설정 완료! Termux:Boot 앱을 통해 기기 켜짐 시 자동으로 실행됩니다."
 }
 
@@ -137,10 +145,22 @@ install() {
     LDFLAGS="-L$PREFIX/lib" \
     "$VENV_PIP" install lxml --no-build-isolation
 
-    echo -e "\n[5/5] FlaskFarm 및 보조 모듈(Celery, Redis, curl_cffi, slack-sdk 등) 설치"
-    "$VENV_PIP" install FlaskFarm redis tzdata pathlib "celery[redis]" slack-sdk curl_cffi gevent psutil requests
+    echo -e "\n[5/5] FlaskFarm 및 보조 모듈 설치"
+    "$VENV_PIP" install FlaskFarm redis tzdata pathlib "celery[redis]" slack-sdk gevent psutil requests
 
+    # 32bit / 64bit 분기에 따른 curl_cffi 처리
     detect_so
+    if [ "$SO" = "64" ]; then
+        echo "64bit 환경: curl_cffi 모듈 설치 시도..."
+        if ! "$VENV_PIP" install curl_cffi; then
+            echo "curl_cffi 설치 실패. 대체 심(Shim)을 생성합니다."
+            create_curl_cffi_shim
+        fi
+    else
+        echo "32bit(${SO}bit / $(uname -m)) 환경 감지: curl_cffi pip 설치를 건너뛰고 대체 심(Shim)을 등록합니다."
+        create_curl_cffi_shim
+    fi
+
     if [ ! -e "$CONFIGFILE" ]; then
         cat <<EOF >"$CONFIGFILE"
 path_data: "$DIR_DATA"
@@ -153,7 +173,8 @@ EOF
 
     add_to_bashrc "nohup ff start > /dev/null 2>&1 &"
     echo -e "\n설치 완료! 가상환경 경로: $VENV_DIR"
-    echo "Redis 바이너리 및 Celery 환경이 준비되었습니다."
+    echo "적용 아키텍처: ${SO}bit"
+    echo "데이터 경로: $DIR_DATA"
     echo "실행: ff start 또는 ff 실행 후 메뉴 2번"
 }
 
@@ -176,12 +197,10 @@ start() {
         return 1
     fi
 
-    # curl_cffi C++ NDK 심볼 에러 방지
     if [ -f "$PREFIX/lib/libc++_shared.so" ]; then
         export LD_PRELOAD="$PREFIX/lib/libc++_shared.so"
     fi
 
-    # 가상환경 바이너리 우선순위 부여
     export PATH="$VENV_DIR/bin:$PATH"
     export VIRTUAL_ENV="$VENV_DIR"
 
@@ -190,14 +209,13 @@ start() {
 
     while [ ! -d "$(dirname "$DIR_DATA")" ]; do sleep 1; done
 
-    # Redis 서버 데몬 자동 확인 및 구동
     if ! pgrep redis-server > /dev/null 2>&1; then
         echo "Redis 서버를 백그라운드로 실행합니다..."
         if command -v redis-server >/dev/null 2>&1; then
             redis-server --daemonize yes > /dev/null 2>&1
             sleep 1
         else
-            echo "경고: redis-server 바이너리를 찾을 수 없습니다. (pkg install redis 필요)"
+            echo "경고: redis-server 바이너리를 찾을 수 없습니다."
         fi
     fi
 
@@ -336,7 +354,7 @@ menu() {
     echo -e "<권장 툴>"
     echo "6. code-server 설치"
     echo "7. Filebrowser 설치"
-    echo "8. rclone 설치 (이치로님 버전)"
+    echo "8. rclone 설치"
     echo "9. ffmpeg 설치"
     echo "$LINE"
     echo -e "<기타>"
